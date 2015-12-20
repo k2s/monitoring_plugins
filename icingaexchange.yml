@@ -1,0 +1,18 @@
+name: monitoring_plugins
+description: "file:///README.md"
+url: "https://github.com/k2s/monitoring_plugins"
+tags: fleet, coreos
+vendor: Linux
+target: Operating System
+type: Plugin
+license: gplv3
+releases:
+  -
+    name: 0.1
+    description: "0.1 Release"
+    files:
+      -
+        name: check_fleet
+        url: "file:///check_fleet"
+        description: "first working release"
+        checksum: 699db14d57e88f9387acf4f989e66512
