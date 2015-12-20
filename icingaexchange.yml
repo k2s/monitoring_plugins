@@ -2,8 +2,8 @@ name: monitoring_plugins
 description: "file:///README.md"
 url: "https://github.com/k2s/monitoring_plugins"
 tags: fleet, coreos
-vendor: Linux
-target: Operating System
+vendor: Linux, CoreOS
+target: Operating System, Cluster, Service
 type: Plugin
 license: gplv3
 releases:

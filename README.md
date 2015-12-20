@@ -1,8 +1,25 @@
+#monitoring_plugins
+
+This plugins work with Nagios and Icinga2.
+
+Documentation focuses on use with Icinga2, becasue I use it.
+
 ## check_fleet
 
-### Icinga2 configuration example
+Check state of systemd units deployed to CoreOS distributed init system Fleet.
 
-in /etc/icinga2/conf.d/commands.conf
+It uses the [Fleet APIv1](https://github.com/coreos/fleet/blob/master/Documentation/api-v1.md) over unix socket or network port.
+
+### Installation
+
+* download ``check_fleet`` and place into ``PluginDir`` which is defined in ``/etc/icinga2/constants.conf``.
+* ``chmod +x check_fleet``
+* configure commands.conf and services.conf (see examples) 
+
+
+### Configuration example for Icinga2
+
+in ``/etc/icinga2/conf.d/commands.conf``
 
     object CheckCommand "my-fleet" {
         import "plugin-check-command"
@@ -26,7 +43,7 @@ in /etc/icinga2/conf.d/commands.conf
 
 
 
-in /etc/icinga2/conf.d/services.conf
+in ``/etc/icinga2/conf.d/services.conf``
     
     apply Service "fleet-unit2-health" {
       # will return error if service exists
@@ -63,5 +80,6 @@ in /etc/icinga2/conf.d/services.conf
 
 ## Resources
 
-* https://help.github.com/articles/github-flavored-markdown/
+* https://exchange.icinga.org/faq#markdown!
 * http://docs.icinga.org/icinga2/latest/doc/module/icinga2/toc#!/icinga2/latest/doc/module/icinga2/chapter/monitoring-basics#check-commands
+* https://github.com/coreos/fleet/blob/master/Documentation/api-v1.md
