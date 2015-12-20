@@ -1,0 +1,251 @@
+#!/usr/bin/env php
+<?php
+define('STATE_OK', 0);
+define('STATE_WARNING', 1);
+define('STATE_CRITICAL', 2);
+define('STATE_UNKNOWN', 3);
+
+function finish($msg, $retVal = STATE_CRITICAL)
+{
+    $state2txt = ['OK', 'WARNING', 'CRITICAL', 'UNKNOWN'];
+    print 'FLEET ' . $state2txt[$retVal] . ": $msg\n";
+    exit($retVal);
+}
+
+// handle parameters
+$options = getopt('n:s:e:h:p');
+function help($errorStr)
+{
+    print "usage: check_fleet -n <unit name> -s <state> [-c <cache timeout>] [-h <hostname or unix socket file>] [-p <port>]\n";
+    print "Options:\n";
+    print "-n   systemd unit name to check\n";
+    print "-s   check unit ActiveState, missing unit is critical only if prefixed with !\n";
+    print "     valid value is 'missing' and see http://www.freedesktop.org/wiki/Software/systemd/dbus/)\n";
+    print "-c   cache fleet status for given seconds, don't cache if 0 (default: 0)\n";
+    print "-h   hostname or location of unix socket file to access Fleet APIv1 (default: unix:///var/run/fleet.sock)\n";
+    print "-p   TCP port to access Fleet APIv1\n";
+    print "\n";
+
+    if ($errorStr) {
+        print "ERROR: $errorStr\n\n";
+    }
+    exit(2);
+}
+
+if (!array_key_exists('n', $options) || !$options['n']) {
+    help("you need to provide value for parameter -n");
+}
+$name = $options['n'];
+
+if (!array_key_exists('s', $options) || !$options['s']) {
+    help("you need to provide value for parameter -s");
+}
+$state = $options['s'];
+if ($state[0] == '!') {
+    $hasToExists = true;
+    $state = substr($state, 1);
+} else {
+    $hasToExists = false;
+}
+
+$cacheTimeOut = array_key_exists('c', $options) ? $options['c'] : 0;
+$hostName = array_key_exists('h', $options) ? $options['h'] : 'unix:///var/run/fleet.sock';
+$port = array_key_exists('p', $options) ? $options['p'] : null;
+
+// process check
+$fleet = new Fleet($hostName, $port, $cacheTimeOut);
+//$fleet->setDebugRawSource('tests/fleetResult.json');
+$state = $fleet->checkStatus($name, $state);
+if (is_null($state)) {
+    // unit not found
+    if ($hasToExists) {
+        finish("unit not found");
+    } else {
+        finish("unit not found", STATE_WARNING);
+    }
+} elseif ($state === true) {
+    finish('OK - ' . $fleet->getInfo(), STATE_OK);
+} else {
+    finish($state . ' - ' . $fleet->getInfo(), STATE_CRITICAL);
+}
+
+
+class Fleet
+{
+    const HTTP_HEADER = 1;
+    const HTTP_BODY = 2;
+    const HTTP_CHUNKSIZE = 3;
+    const HTTP_CHUNK = 4;
+    private $_debugRawFile;
+    private $_hostName;
+    private $_port;
+    private $_cacheTimeOut;
+    private $_info;
+
+    function __construct($hostName, $port, $cacheTimeOut)
+    {
+        $this->_hostName = $hostName;
+        $this->_port = $port;
+        $this->_cacheTimeOut = $cacheTimeOut;
+    }
+
+    function setDebugRawSource($filePath)
+    {
+        $this->_debugRawFile = $filePath;
+    }
+
+    function checkStatus($service, $state)
+    {
+        // get data
+        $data = $this->getIndexedData();
+        $this->_info = [];
+
+        // find service
+        if (array_key_exists($service, $data)) {
+            if ($state === "missing") {
+                // expected was that it will be missing
+                return "service exists";
+            }
+
+            $units = $data[$service];
+        } else {
+            // not found
+            if ($state === "missing") {
+                return true;
+            }
+            return null;
+        }
+
+        // compare state
+        $i = 0;
+        $errorsIn = [];
+        $msg = [];
+        foreach ($units as $unit) {
+            if ($unit->systemdActiveState != $state) {
+                $errorsIn[] = $i + 1;
+            }
+            $msg[] = $unit->systemdActiveState . '/' . $unit->systemdSubState;
+            $i++;
+        }
+
+        $this->_info = $msg;
+        if (count($errorsIn)) {
+            return 'error in unit(s) ' . implode(',', $errorsIn);
+        } else {
+            return true;
+        }
+    }
+
+    function getInfo()
+    {
+        return implode(';', $this->_info);
+    }
+
+
+    function getIndexedData()
+    {
+        // TODO use cache
+
+        $d = $this->getRawData();
+        $d = $this->indexData($d);
+
+        // TODO store to cache
+
+        return $d;
+    }
+
+    function indexData($raw)
+    {
+        $data = [];
+        foreach ($raw as $o) {
+            if (array_key_exists($o->name, $data)) {
+                $data[$o->name][] = $o;
+            } else {
+                $data[$o->name] = [$o];
+            }
+        }
+
+        return $data;
+    }
+
+    function getRawData($page = false)
+    {
+        if ($this->_debugRawFile) {
+            return json_decode(file_get_contents($this->_debugRawFile));
+        }
+
+        // get HTTP data
+        $httpBody = "";
+        $readBlockSize = 512; // 128
+        $fp = fsockopen($this->_hostName, $this->_port, $errno, $errstr, 5);
+        if (!$fp) {
+            finish("$errstr ($errno)");
+        } else {
+            if ($page) {
+                $out = "GET /fleet/v1/state?nextPageToken=$page HTTP/1.1\r\n";
+            } else {
+                $out = "GET /fleet/v1/state HTTP/1.1\r\n";
+            }
+            $out .= "Connection: Close\r\n\r\n";
+            fwrite($fp, $out);
+            $state = self::HTTP_HEADER;
+            $contentLength = false;
+            $chunkLength = 0;
+
+            $httpLine = fgets($fp, 128);
+            if ($httpLine && preg_match('#^HTTP/1.\d?\s+200\s+#', $httpLine)) {
+                while (!feof($fp)) {
+                    switch ($state) {
+                        case self::HTTP_HEADER:
+                            $s = fgets($fp, 128);
+                            if (!trim($s)) {
+                                $state = $contentLength ? self::HTTP_BODY : self::HTTP_CHUNKSIZE;
+                                continue;
+                            }
+
+                            list($name, $value) = explode(":", $s, 2);
+                            if (strcasecmp(trim($name), 'content-length') === 0) {
+                                $contentLength = (int)trim($value);
+                            }
+                            break;
+                        case self::HTTP_BODY:
+                            $httpBody .= fgets($fp, $readBlockSize);
+                            break;
+                        case self::HTTP_CHUNKSIZE:
+                            $s = trim(fgets($fp, 128));
+                            $chunkLength = hexdec($s);
+                            if ($chunkLength) {
+                                $state = self::HTTP_CHUNK;
+                            } else {
+                                // no more chunks, move to end of response
+                                fread($fp, $readBlockSize);
+                            }
+                            break;
+                        case self::HTTP_CHUNK:
+                            $read = min($chunkLength, $readBlockSize);
+                            $chunkLength -= $read;
+                            $httpBody .= fread($fp, $read);
+                            if ($chunkLength <= 0) {
+                                fseek($fp, 2, SEEK_CUR);
+                                $state = self::HTTP_CHUNKSIZE;
+                            }
+                            break;
+                    }
+                }
+            } else {
+                finish("wrong HTTP response - $httpLine");
+            }
+            fclose($fp);
+        }
+
+        // handle pagination
+        $json = json_decode($httpBody);
+        if (property_exists($json, 'nextPageToken') && $json->nextPageToken) {
+            $json = array_merge($json->states, $this->getRawData($json->nextPageToken));
+        } else {
+            $json = $json->states;
+        }
+
+        return $json;
+    }
+}
