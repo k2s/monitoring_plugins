@@ -13,17 +13,18 @@ function finish($msg, $retVal = STATE_CRITICAL)
 }
 
 // handle parameters
-$options = getopt('n:s:e:h:p');
+$options = getopt('n:s:h:p:c:f:');
 function help($errorStr)
 {
-    print "usage: check_fleet -n <unit name> -s <state> [-c <cache timeout>] [-h <hostname or unix socket file>] [-p <port>]\n";
+    print "usage: check_fleet -n <unit name> -s <state> [-h <hostname or unix socket file>] [-p <port>] [-c <cache timeout>] [-f <cache file>]\n";
     print "Options:\n";
     print "-n   systemd unit name to check\n";
     print "-s   check unit ActiveState, missing unit is critical only if prefixed with !\n";
     print "     valid value is 'missing' and see http://www.freedesktop.org/wiki/Software/systemd/dbus/)\n";
-    print "-c   cache fleet status for given seconds, don't cache if 0 (default: 0)\n";
     print "-h   hostname or location of unix socket file to access Fleet APIv1 (default: unix:///var/run/fleet.sock)\n";
     print "-p   TCP port to access Fleet APIv1\n";
+    print "-c   cache fleet status for given seconds, don't cache if 0 (default: 10)\n";
+    print "-f   cache fleet status into this file (default: /tmp/check_fleet_cache.json)\n";
     print "\n";
 
     if ($errorStr) {
@@ -48,13 +49,16 @@ if ($state[0] == '!') {
     $hasToExists = false;
 }
 
-$cacheTimeOut = array_key_exists('c', $options) ? $options['c'] : 0;
+$cacheTimeOut = array_key_exists('c', $options) ? $options['c'] : 10;
+$cacheFile = array_key_exists('f', $options) ? $options['f'] : '/tmp/check_fleet_cache.json';
 $hostName = array_key_exists('h', $options) ? $options['h'] : 'unix:///var/run/fleet.sock';
 $port = array_key_exists('p', $options) ? $options['p'] : null;
 
 // process check
 $fleet = new Fleet($hostName, $port, $cacheTimeOut);
+$fleet->setCacheFile($cacheFile);
 //$fleet->setDebugRawSource('tests/fleetResult.json');
+
 $state = $fleet->checkStatus($name, $state);
 if (is_null($state)) {
     // unit not found
@@ -81,6 +85,7 @@ class Fleet
     private $_port;
     private $_cacheTimeOut;
     private $_info;
+    private $_cacheSourceFile = "/tmp/check_fleet_cache.json";
 
     function __construct($hostName, $port, $cacheTimeOut)
     {
@@ -92,6 +97,11 @@ class Fleet
     function setDebugRawSource($filePath)
     {
         $this->_debugRawFile = $filePath;
+    }
+
+    function setCacheFile($filePath)
+    {
+        $this->_cacheSourceFile = $filePath;
     }
 
     function checkStatus($service, $state)
@@ -144,12 +154,18 @@ class Fleet
 
     function getIndexedData()
     {
-        // TODO use cache
+        // use cache if available
+        if ($this->_cacheTimeOut > 0 && file_exists($this->_cacheSourceFile) && time() - $this->_cacheTimeOut < filemtime($this->_cacheSourceFile)) {
+            $d = unserialize(file_get_contents($this->_cacheSourceFile));
+        } else {
+            $d = $this->getRawData();
+            $d = $this->indexData($d);
 
-        $d = $this->getRawData();
-        $d = $this->indexData($d);
-
-        // TODO store to cache
+            if ($this->_cacheTimeOut > 0) {
+                // store to cache if in use
+                file_put_contents($this->_cacheSourceFile, serialize($d));
+            }
+        }
 
         return $d;
     }
