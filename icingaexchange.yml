@@ -16,3 +16,12 @@ releases:
         url: "file:///check_fleet"
         description: "first working release"
         checksum: 699db14d57e88f9387acf4f989e66512
+  -
+    name: 0.2
+    description: "0.2 Release"
+    files:
+      -
+        name: check_fleet
+        url: "file:///check_fleet"
+        description: "add fleet results caching timeout and location"
+        checksum: 25a7f28adb5ebb49baa9c47ea4447c55
