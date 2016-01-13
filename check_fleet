@@ -57,7 +57,7 @@ $port = array_key_exists('p', $options) ? $options['p'] : null;
 // process check
 $fleet = new Fleet($hostName, $port, $cacheTimeOut);
 $fleet->setCacheFile($cacheFile);
-//$fleet->setDebugRawSource('tests/fleetResult.json');
+$fleet->setDebugRawSource('tests/fleetResult.json');
 
 $state = $fleet->checkStatus($name, $state);
 if (is_null($state)) {
@@ -131,8 +131,21 @@ class Fleet
         $errorsIn = [];
         $msg = [];
         foreach ($units as $unit) {
-            if ($unit->systemdActiveState != $state) {
-                $errorsIn[] = $i + 1;
+            //split state to array if dealing with multistate
+            $states = explode(",",$state);
+            foreach ($states as $s) {
+                if (strpos($s, "/") !== false) {
+                    $ss = explode("/", $s);
+                    if ($unit->systemdActiveState != $ss[0] || $unit->systemdSubState != $ss[1] ) {
+                        $errorsIn[] = $unit->machineID .": ". $unit->systemdActiveState ."/". $unit->systemdSubState  ;
+                    }
+                } else {
+                    if ($unit->systemdActiveState != $s) {
+                        $errorsIn[] = $unit->machineID .": ". $unit->systemdActiveState;
+                    }
+                }
+
+
             }
             $msg[] = $unit->systemdActiveState . '/' . $unit->systemdSubState;
             $i++;
