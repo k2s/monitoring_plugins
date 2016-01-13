@@ -77,6 +77,10 @@ in ``/etc/icinga2/conf.d/services.conf``
       assign where host.name == NodeName
     }
 
+## Development
+
+    sudo ssh -nNT -oStrictHostKeyChecking=no -L /var/run/fleet2.sock:/var/run/fleet.sock -i /root/.ssh/coreos.pem core@<SERVER>
+    sudo chmod 777 /var/run/fleet2.sock
 
 ## Resources
 
