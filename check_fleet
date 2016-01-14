@@ -57,7 +57,6 @@ $port = array_key_exists('p', $options) ? $options['p'] : null;
 // process check
 $fleet = new Fleet($hostName, $port, $cacheTimeOut);
 $fleet->setCacheFile($cacheFile);
-$fleet->setDebugRawSource('tests/fleetResult.json');
 
 $state = $fleet->checkStatus($name, $state);
 if (is_null($state)) {
@@ -80,7 +79,7 @@ class Fleet
     const HTTP_BODY = 2;
     const HTTP_CHUNKSIZE = 3;
     const HTTP_CHUNK = 4;
-    private $_debugRawFile;
+
     private $_hostName;
     private $_port;
     private $_cacheTimeOut;
@@ -92,11 +91,6 @@ class Fleet
         $this->_hostName = $hostName;
         $this->_port = $port;
         $this->_cacheTimeOut = $cacheTimeOut;
-    }
-
-    function setDebugRawSource($filePath)
-    {
-        $this->_debugRawFile = $filePath;
     }
 
     function setCacheFile($filePath)
@@ -111,13 +105,13 @@ class Fleet
         $this->_info = [];
 
         // find service
-        if (array_key_exists($service, $data)) {
+        if (array_key_exists($service, $data["states"])) {
             if ($state === "missing") {
                 // expected was that it will be missing
                 return "service exists";
             }
 
-            $units = $data[$service];
+            $units = $data["states"][$service];
         } else {
             // not found
             if ($state === "missing") {
@@ -138,15 +132,15 @@ class Fleet
                 if (strpos($s, "/") !== false) {
                     $ss = explode("/", $s);
                     if ($unit->systemdActiveState != $ss[0] || $unit->systemdSubState != $ss[1] ) {
-                        $errorsIn[$unit->machineID] = $unit->systemdActiveState ."/". $unit->systemdSubState  ;
+                        $errorsIn[$data["machines"][$unit->machineID]->metadata->name] = $unit->systemdActiveState ."/". $unit->systemdSubState  ;
                     } else {
-                        $checkPass[] = $unit->machineID;
+                        $checkPass[] = $data["machines"][$unit->machineID]->metadata->name;
                     }
                 } else {
                     if ($unit->systemdActiveState != $s) {
-                        $errorsIn[$unit->machineID] = $unit->systemdActiveState;
+                        $errorsIn[$data["machines"][$unit->machineID]->metadata->name] = $unit->systemdActiveState;
                     } else {
-                        $checkPass[] = $unit->machineID;
+                        $checkPass[] = $data["machines"][$unit->machineID]->metadata->name;
                     }
                 }
 
@@ -196,35 +190,50 @@ class Fleet
 
     function indexData($raw)
     {
-        $data = [];
-        foreach ($raw as $o) {
-            if (array_key_exists($o->name, $data)) {
-                $data[$o->name][] = $o;
+        // index states data
+        $states = [];
+        foreach ($raw['states'] as $o) {
+            if (array_key_exists($o->name, $states)) {
+                $states[$o->name][] = $o;
             } else {
-                $data[$o->name] = [$o];
+                $states[$o->name] = [$o];
             }
         }
 
-        return $data;
-    }
-
-    function getRawData($page = false)
-    {
-        if ($this->_debugRawFile) {
-            return json_decode(file_get_contents($this->_debugRawFile));
+        // transpose machine data
+        $machines = [];
+        foreach ($raw['machines'] as $o) {
+            $machines[$o->id] = $o;
         }
 
+        return [
+            'machines' => $machines,
+            'states' => $states
+        ];
+
+    }
+
+    function getRawData()
+    {
+        return [
+            'machines' => $this->apiFleetGet("/fleet/v1/machines", 'machines'),
+            'states' => $this->apiFleetGet("/fleet/v1/state", 'states')
+        ];
+    }
+
+    function apiFleetGet($v1GetUrl, $field, $page = false)
+    {
         // get HTTP data
         $httpBody = "";
         $readBlockSize = 512; // 128
-        $fp = fsockopen($this->_hostName, $this->_port, $errno, $errstr, 5);
+        $fp = fsockopen($this->_hostName, $this->_port, $errno, $errStr, 5);
         if (!$fp) {
-            finish("$errstr ($errno)");
+            finish("$errStr ($errno)");
         } else {
             if ($page) {
-                $out = "GET /fleet/v1/state?nextPageToken=$page HTTP/1.1\r\n";
+                $out = "GET $v1GetUrl?nextPageToken=$page HTTP/1.1\r\n";
             } else {
-                $out = "GET /fleet/v1/state HTTP/1.1\r\n";
+                $out = "GET $v1GetUrl HTTP/1.1\r\n";
             }
             $out .= "Connection: Close\r\n\r\n";
             fwrite($fp, $out);
@@ -281,9 +290,9 @@ class Fleet
         // handle pagination
         $json = json_decode($httpBody);
         if (property_exists($json, 'nextPageToken') && $json->nextPageToken) {
-            $json = array_merge($json->states, $this->getRawData($json->nextPageToken));
+            $json = array_merge($json->$field, $this->apiFleetGet($v1GetUrl, $field, $json->nextPageToken));
         } else {
-            $json = $json->states;
+            $json = $json->$field;
         }
 
         return $json;
