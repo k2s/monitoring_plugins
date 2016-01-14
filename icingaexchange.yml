@@ -25,3 +25,12 @@ releases:
         url: "file:///check_fleet"
         description: "add fleet results caching timeout and location"
         checksum: 25a7f28adb5ebb49baa9c47ea4447c55
+  -
+    name: 0.3
+    description: "0.3 Release"
+    files:
+      -
+        name: check_fleet
+        url: "file:///check_fleet"
+        description: "show machine names and support multiple states and substates"
+        checksum: a792aa3bd0a7237b238e4d18ca54e4e2
