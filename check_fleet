@@ -130,6 +130,7 @@ class Fleet
         $i = 0;
         $errorsIn = [];
         $msg = [];
+        $checkPass = [];
         foreach ($units as $unit) {
             //split state to array if dealing with multistate
             $states = explode(",",$state);
@@ -137,15 +138,21 @@ class Fleet
                 if (strpos($s, "/") !== false) {
                     $ss = explode("/", $s);
                     if ($unit->systemdActiveState != $ss[0] || $unit->systemdSubState != $ss[1] ) {
-                        $errorsIn[] = $unit->machineID .": ". $unit->systemdActiveState ."/". $unit->systemdSubState  ;
+                        $errorsIn[$unit->machineID] = $unit->systemdActiveState ."/". $unit->systemdSubState  ;
+                    } else {
+                        $checkPass[] = $unit->machineID;
                     }
                 } else {
                     if ($unit->systemdActiveState != $s) {
-                        $errorsIn[] = $unit->machineID .": ". $unit->systemdActiveState;
+                        $errorsIn[$unit->machineID] = $unit->systemdActiveState;
+                    } else {
+                        $checkPass[] = $unit->machineID;
                     }
                 }
 
-
+            }
+            foreach ($checkPass as $cp) {
+                unset($errorsIn[$cp]);
             }
             $msg[] = $unit->systemdActiveState . '/' . $unit->systemdSubState;
             $i++;
@@ -153,7 +160,11 @@ class Fleet
 
         $this->_info = $msg;
         if (count($errorsIn)) {
-            return 'error in unit(s) ' . implode(',', $errorsIn);
+            return 'error in unit(s) ' . implode(', ', array_map(
+                function ($k, $v) { return "$k ($v)"; },
+                array_keys($errorsIn),
+                array_values($errorsIn)
+            ));
         } else {
             return true;
         }
