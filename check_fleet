@@ -51,7 +51,7 @@ if ($state[0] == '!') {
 
 $cacheTimeOut = array_key_exists('c', $options) ? $options['c'] : 10;
 $cacheFile = array_key_exists('f', $options) ? $options['f'] : '/tmp/check_fleet_cache.json';
-$hostName = array_key_exists('h', $options) ? $options['h'] : 'unix:///var/run/fleet.sock';
+$hostName = array_key_exists('h', $options) ? $options['h'] : 'unix:///var/run/fleet2.sock';
 $port = array_key_exists('p', $options) ? $options['p'] : null;
 
 // process check
@@ -126,9 +126,29 @@ class Fleet
         $i = 0;
         $errorsIn = [];
         $msg = [];
+        $checkPass = [];
         foreach ($units as $unit) {
-            if ($unit->systemdActiveState != $state) {
-                $errorsIn[] = $i + 1;
+            //split state to array if dealing with multistate
+            $states = explode(",", $state);
+            foreach ($states as $s) {
+                if (strpos($s, "/") !== false) {
+                    $ss = explode("/", $s);
+                    if ($unit->systemdActiveState != $ss[0] || $unit->systemdSubState != $ss[1]) {
+                        $errorsIn[$machines[$unit->machineID]->metadata->name] = $unit->systemdActiveState . "/" . $unit->systemdSubState;
+                    } else {
+                        $checkPass[] = $machines[$unit->machineID]->metadata->name;
+                    }
+                } else {
+                    if ($unit->systemdActiveState != $s) {
+                        $errorsIn[$machines[$unit->machineID]->metadata->name] = $unit->systemdActiveState;
+                    } else {
+                        $checkPass[] = $machines[$unit->machineID]->metadata->name;
+                    }
+                }
+
+            }
+            foreach ($checkPass as $cp) {
+                unset($errorsIn[$cp]);
             }
             $msg[] = $unit->systemdActiveState . '/' . $unit->systemdSubState;
             $i++;
@@ -136,7 +156,13 @@ class Fleet
 
         $this->_info = $msg;
         if (count($errorsIn)) {
-            return 'error in unit(s) ' . implode(',', $errorsIn);
+            return 'error in unit(s) ' . implode(', ', array_map(
+                function ($k, $v) {
+                    return "$k ($v)";
+                },
+                array_keys($errorsIn),
+                array_values($errorsIn)
+            ));
         } else {
             return true;
         }
